@@ -1,5 +1,7 @@
-import { createContext, ReactNode, useState } from "react";
+import { createContext, ReactNode, useEffect, useState } from "react";
 import Router from 'next/router';
+import { setCookie, parseCookies } from 'nookies'
+
 import { api } from "../services/api";
 
 type User = {
@@ -25,18 +27,39 @@ type AuthProviderProps = {
 
 export const AuthContext = createContext({} as AuthContextData)
 
-export function AuthProvider({children}:AuthProviderProps){
+export function AuthProvider({ children }: AuthProviderProps) {
     const [user, setUser] = useState<User>()
     const isAuthenticated = !!user;
 
-    async function signIn({email, password}: SignInCredentials){
+    useEffect(() => {
+        const { 'nextauth.token': token } = parseCookies()
+
+        if (token) {
+            api.get('/me').then(response => {
+                const { email, permissions, roles } = response.data
+
+                setUser({ email, permissions, roles })
+            })
+        }
+    }, [])
+
+    async function signIn({ email, password }: SignInCredentials) {
         try {
             const response = await api.post('sessions', {
                 email,
                 password,
             })
 
-            const {token, refreshToken, permissions, roles} = response.data
+            const { token, refreshToken, permissions, roles } = response.data
+
+            setCookie(undefined, 'nextauth.token', token, {
+                maxAge: 60 * 60 * 24 * 30, // 30 dias
+                path: '/',
+            }) //undefined quando executa no client
+            setCookie(undefined, 'nextauth.refreshToken', refreshToken, {
+                maxAge: 60 * 60 * 24 * 30, // 30 dias
+                path: '/',
+            })
 
             // sessionStorage
             // localStorage
@@ -48,6 +71,9 @@ export function AuthProvider({children}:AuthProviderProps){
                 roles,
             })
 
+            // atualizo o header para primeiro acesso
+            api.defaults.headers['Authorization'] = `Bearer ${token}`;
+
             Router.push('/dashboard')
         } catch (err) {
             console.log(err)
@@ -55,7 +81,7 @@ export function AuthProvider({children}:AuthProviderProps){
     }
 
     return (
-        <AuthContext.Provider value={{signIn, isAuthenticated, user}}>
+        <AuthContext.Provider value={{ signIn, isAuthenticated, user }}>
             {children}
         </AuthContext.Provider>
     )
